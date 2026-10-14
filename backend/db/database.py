@@ -1,7 +1,17 @@
+import os
 from pathlib import Path
+import socket
+import sys
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+if sys.platform == "win32":
+    import asyncio
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    except Exception:
+        pass
 
 BACKEND_ENV_FILE = Path(__file__).parent.parent / ".env"
 ROOT_ENV_FILE = Path(__file__).resolve().parents[2] / "env"
@@ -23,9 +33,23 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-_is_postgres = settings.DATABASE_URL.startswith("postgresql")
+def _check_port(host: str, port: int, timeout: float = 0.5) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (socket.timeout, ConnectionRefusedError, OSError):
+        return False
+
+# Determine effective database URL with automatic offline-first edge fallback
+effective_db_url = settings.DATABASE_URL
+if effective_db_url.startswith("postgresql") and any(h in effective_db_url for h in ("localhost", "127.0.0.1")):
+    if not _check_port("127.0.0.1", 5432):
+        print("[EDGE RESCUE] Local PostgreSQL (localhost:5432) not detected. Operating in standalone edge mode with local SQLite database (./edgerescue.db).")
+        effective_db_url = "sqlite+aiosqlite:///./edgerescue.db"
+
+_is_postgres = effective_db_url.startswith("postgresql")
 _is_remote = _is_postgres and all(
-    host not in settings.DATABASE_URL
+    host not in effective_db_url
     for host in ("localhost", "127.0.0.1", "@postgres:", "@postgres/")
 )
 
@@ -33,7 +57,7 @@ _is_remote = _is_postgres and all(
 # Supabase's pgbouncer transaction pooler (port 6543).
 _connect_args = {"prepare_threshold": None, "sslmode": "require"} if _is_remote else {}
 
-engine = create_async_engine(settings.DATABASE_URL, echo=False, connect_args=_connect_args)
+engine = create_async_engine(effective_db_url, echo=False, connect_args=_connect_args)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
