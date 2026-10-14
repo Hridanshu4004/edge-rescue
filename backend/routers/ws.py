@@ -13,9 +13,21 @@ router = APIRouter()
 
 
 async def _listen(ws: WebSocket, channel: str):
-    r: aioredis.Redis = get_redis()
-    pubsub = r.pubsub()
-    await pubsub.subscribe(channel)
+    pubsub = None
+    try:
+        r: aioredis.Redis = get_redis()
+        pubsub = r.pubsub()
+        await pubsub.subscribe(channel)
+    except Exception:
+        # When Redis is offline, maintain WebSocket connection with lightweight heartbeats
+        try:
+            while True:
+                await asyncio.sleep(15)
+                await ws.send_text(json.dumps({"event": "ping", "edge_mode": "standalone"}))
+        except (WebSocketDisconnect, asyncio.CancelledError):
+            pass
+        return
+
     try:
         async for message in pubsub.listen():
             if message["type"] == "message":
@@ -23,8 +35,12 @@ async def _listen(ws: WebSocket, channel: str):
     except (WebSocketDisconnect, asyncio.CancelledError):
         pass
     finally:
-        await pubsub.unsubscribe(channel)
-        await pubsub.aclose()
+        if pubsub:
+            try:
+                await pubsub.unsubscribe(channel)
+                await pubsub.aclose()
+            except Exception:
+                pass
 
 
 @router.websocket("/ws/supervisor")
