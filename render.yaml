@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: edge-rescue-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.11
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:///./edgerescue.db
+      - key: REDIS_URL
+        value: redis://localhost:6379
+      - key: GEMINI_API_KEY
+        value: AQ.Ab8RN6K9UPox0kwqqMPrOC_-R8h3x2axVKEvui-8ltlMcL2MGQ
+      - key: GEMMA_MODEL
+        value: gemma-4-26b-a4b-it
+      - key: GEMMA_TRIAGE_MODEL
+        value: gemma-4-26b-a4b-it
+      - key: GEMINI_INSECURE_SKIP_VERIFY
+        value: "true"
